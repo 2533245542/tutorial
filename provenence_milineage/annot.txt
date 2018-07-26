@@ -1,0 +1,7 @@
+branch_bracket_depth	0.8
+branch_bracket_width	0.25
+branch_thickness	0.5
+clade_marker_size	1
+clade_marker_edge_color	#555555
+clade_marker_edge_width	0.1
+

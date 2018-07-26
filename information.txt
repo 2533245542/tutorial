@@ -1,0 +1,25 @@
+## === specify the variable names for the covariate in meta file === ##
+COVA = Normal
+STRATA = triplet
+
+## === request distances === ##
+DIST = Bray-Curtis
+DIST_NORM = Proportion
+DIST_OFILE = Dbc.dist
+
+DIST = Jaccard
+DIST_NORM = Rarefaction
+DIST_OFILE = Dj.dist
+
+DIST = uwUniFrac
+DIST_NORM = Rarefaction
+DIST_OFILE = Duw.dist
+
+DIST = wUniFrac
+DIST_NORM = Proportion
+DIST_OFILE = Dw.dist
+
+DIST = pwUniFrac
+DIST_NORM = 0
+DIST_OFILE = Dpw.dist
+
