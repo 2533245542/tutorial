@@ -49,7 +49,12 @@ deppkgs = c(phyloseq = "1.16.0",
             png = "0.1.7", 
             RColorBrewer = "1.1.2",
             scales = "0.4.0",
-            miLineage = "2.1")
+            miLineage = "2.1",
+            caret = "6.0.79",
+            phangorn = "2.4.0",
+            magrittr = "1.5",
+            gridExtra = "2.3",
+            miProfile = "1.0")
 # Loop on package check, install, update
 pkg1 = mapply(install_missing_packages,
               pkg = names(deppkgs), 

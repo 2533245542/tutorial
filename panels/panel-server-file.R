@@ -7,9 +7,6 @@ output$file1_info <- renderTable({
 output$treefile_info <- renderTable({
   input$treefile
 })
-# output$filetree_info <- renderTable({
-#   input$filetree
-# })
 
 output$phyloseqDataset <- renderUI({
   # Expect the side-effect of these functions to be to add
@@ -108,5 +105,15 @@ get_phyloseq_data = reactive({
     return(ps0)
   } else {
     return(NULL)
+  }
+})
+
+observeEvent(c(input$file1, input$filebiom), {
+  source("functions/mistudio_file_storefile.R")
+  if(!is.null(input$file1)){
+    mistudio_file_storefile(input$file1$name, input$file1$datapath)  
+  }
+  if(!is.null(input$filebiom)){
+    mistudio_file_storefile(input$filebiom$name, input$filebiom$datapath)
   }
 })

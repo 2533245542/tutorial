@@ -132,39 +132,39 @@ rankNames = reactive({
     names(variNames) <- variNames
     return(variNames)
   })
-  vars = function(type="both", withnull=TRUE, singles=FALSE){
-    if(!type %in% c("both", "taxa", "samples")){
-      stop("incorrect `type` specification when accessing variables for UI.")
-    }
-    returnvars = NULL
-    if(type=="samples"){
-      if(singles){
-        returnvars <- c(list(Sample="Sample"), variNames())
-      } else {
-        returnvars <- variNames()
-      }
-    }
-    if(type=="taxa"){
-      if(singles){
-        returnvars <- c(rankNames(), list(OTU="OTU"))
-      } else {
-        returnvars <- rankNames()
-      }
-    } 
-    if(type=="both"){
-      # Include all variables
-      if(singles){
-        returnvars <- c(rankNames(), variNames(), list(OTU="OTU", Sample="Sample"))
-      } else {
-        returnvars <- c(rankNames(), variNames())
-      }
-    }
-    if(withnull){
-      # Put NULL first so that it is default when `select` not specified
-      returnvars <- c(list("NULL"="NULL"), returnvars)
-    }
-    return(returnvars)
-  }
+  # vars = function(type="both", withnull=TRUE, singles=FALSE){
+  #   if(!type %in% c("both", "taxa", "samples")){
+  #     stop("incorrect `type` specification when accessing variables for UI.")
+  #   }
+  #   returnvars = NULL
+  #   if(type=="samples"){
+  #     if(singles){
+  #       returnvars <- c(list(Sample="Sample"), variNames())
+  #     } else {
+  #       returnvars <- variNames()
+  #     }
+  #   }
+  #   if(type=="taxa"){
+  #     if(singles){
+  #       returnvars <- c(rankNames(), list(OTU="OTU"))
+  #     } else {
+  #       returnvars <- rankNames()
+  #     }
+  #   } 
+  #   if(type=="both"){
+  #     # Include all variables
+  #     if(singles){
+  #       returnvars <- c(rankNames(), variNames(), list(OTU="OTU", Sample="Sample"))
+  #     } else {
+  #       returnvars <- c(rankNames(), variNames())
+  #     }
+  #   }
+  #   if(withnull){
+  #     # Put NULL first so that it is default when `select` not specified
+  #     returnvars <- c(list("NULL"="NULL"), returnvars)
+  #   }
+  #   return(returnvars)
+  # }
   # A generic selectInput UI. Plan is to pass a reactive argument to `choices`.
   uivar = function(id, label="Variable:", choices, selected="NULL"){
     selectInput(inputId=id, label=label, choices=choices, selected=selected)
@@ -229,7 +229,7 @@ env_psdata = new.env()
 # Keep server-loaded data into a special environemnt, `env_psdata`
 data(list=c("GlobalPatterns", "enterotype", "esophagus"), envir = env_psdata)
 load("data/exampledata.RData", envir = env_psdata)
-load("data/1457_uparse.RData", envir = env_psdata)
+load("data/closed_1457_uparse.RData", envir = env_psdata)
 attach(env_psdata)
 # Define initial list of available datasets
 datalist = list(

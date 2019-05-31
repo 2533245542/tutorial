@@ -89,7 +89,7 @@ env_psdata = new.env()
 # Keep server-loaded data into a special environemnt, `env_psdata`
 data(list=c("GlobalPatterns", "enterotype", "esophagus"), envir = env_psdata)
 load("data/kostic.RData", envir = env_psdata)
-load("data/1457_uparse.RData", envir = env_psdata)
+load("data/closed_1457_uparse.RData", envir = env_psdata)
 attach(env_psdata)
 # Define initial list of available datasets
 datalist = list(

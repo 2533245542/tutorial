@@ -1,256 +1,363 @@
-# library(phyloseq)
-# library(caret)
-# library(miLineage)
+# milineage_cova, conf, extra should be in the format of a string vector of "value%mistudio_seperatorcolumnname"
+# e.g. c("1%mistudio_seperator%columnA", "Male%mistudio_seperator%Sex", "age%mistudio_seperator%age")
+# TODO the writing of the program is done, but we need to test it
+mistudio_milineage = function(
+  phyobj = NULL,
+  milineage_function = NULL,
+  milineage_cova = NULL,
+  milineage_conf = NULL,
+  milineage_cova_extra = NULL,
+  milineage_conf_extra = NULL,
+  milineage_mindepth = NULL,
+  milineage_nresample = NULL,
+  milineage_fdralpha = NULL,
+  milineage_ZI.LB = NULL,
+  milineage_testtype  = NULL
+){
+  
+  stopifnot(!is.null(phyobj))
+  stopifnot(!is.null(milineage_function)) 
+  stopifnot(!is.null(milineage_cova))
+  
+  # remove NA rows in sample, but only look for NA's in selected variables
+  remove_sample_na = function(
+    phyobj, 
+    milineage_cova,
+    milineage_conf,
+    milineage_cova_extra,
+    milineage_conf_extra,
+    milineage_function){
 
-mistudio_milineage = function(phyobj= NULL, cov_n= NULL, cov_c = NULL, con_n= NULL, con_c= NULL, 
-	n.resample = 1000, fdr.alpha = 0.05, min.depth = 0){
-
-	library(phyloseq)
-
-	stopifnot(!is.null(phyobj))
-	stopifnot(!is.null(cov_n) | !is.null(cov_c)) # must select one kind of covariate (numeric or categorical)
-
-	stopifnot(is.numeric(n.resample))
-	stopifnot(is.numeric(fdr.alpha))
-
-	# > data.real$OTU.real %>% dim()
-	# [1] 96 80
-	# > data.real$Tax.real %>% dim()
-	# [1] 80  6
-	# > data.real$covariate.real %>% dim()
-
-	milineage = function(phyobj, cov_n, cov_c, con_n, con_c, 
-		n.resample = 1000, fdr.alpha = 0.05, min.depth = 0){
-
-		adjust_otu_dimmension = function(otu, tax, sample){
-
-			otu_dim = dim(otu)
-			tax_dim = dim(tax)
-			sample_dim = dim(sample)
-
-			if(otu_dim[1] == tax_dim[1]) otu = t(otu)
-
-			otu_dim_new = dim(otu)
-			stopifnot(otu_dim_new[2] == tax_dim[1])
-			stopifnot(otu_dim_new[1] == sample_dim[1])
-
-			return(otu)
-		}
-
-		get_sample.QCAT_GEE_index = function(sample = NULL, cov_n = NULL, cov_c = NULL, con_n = NULL, con_c = NULL){
-
-			get_dummy = function(sample, cov_c, con_c){
-				data = as.data.frame(x = sample@.Data, row.names = sample@row.names, col.names = sample@names)
-				model = dummyVars(~., data = data)
-				dummy = predict(model, data)
-				index_cov = sapply(cov_c, function(X) grep(X, colnames(dummy)))
-				index_con = sapply(con_c, function(X) grep(X, colnames(dummy)))
-				
-				print(as.numeric(index_cov))
-				print(dummy[, as.numeric(index_cov)])
-
-				result = list(cov = as.data.frame(dummy[, as.numeric(index_cov)]), # cast to data.frame in case index_cov
-					con = as.data.frame(dummy[, as.numeric(index_con)]))		   # has length 1 and returned as a vector
-				return(result)													   # That would make ncol(dummy$cov) == 0
-			}
-
-			remove_linear_independent_columns = function(m){
-				result = m[, qr(m)$pivot[seq_len(qr(m)$rank)]] # StackOverflow solution
-				return(result)
-			}
-
-			if(is.null(cov_c) & is.null(con_c)){ # no categorical variable selected
-
-				if(is.null(con_n)){ # no numeric confounding column selected
-					mat = as.matrix(sample[, cov_n])
-				} else{
-					mat = as.matrix(cbind(sample[, cov_n], sample[, con_n]))	
-				}
-
-				index = 1:length(cov_n)
-				result = list(mat = mat, index = index)
-				return(result)
-			}
-			
-			dummy = get_dummy(sample, cov_c, con_c)
-
-			# combine categorical and numeric columns
-			if(is.null(cov_n)){
-				if(is.null(con_n)){
-					mat = cbind(dummy$cov, dummy$con)
-				}
-				else{
-					mat = cbind(dummy$cov, dummy$con, sample[ ,con_n])
-				}
-			} else{
-				if(is.null(con_n)){
-					mat = cbind(dummy$cov, sample[ ,cov_n], dummy$con)
-				}
-				else{
-					mat = cbind(dummy$cov, sample[ ,cov_n], dummy$con, sample[ ,con_n])
-				}
-				
-			}
-
-			mat = as.matrix(remove_linear_independent_columns(mat))
-
-			index = 1:(ncol(dummy$cov) + length(cov_n))
-			result  = list(mat = mat, index = index)
-			return(result)
-		}
-
-		.Rarefy = function (otu.tab) 
-		{
-		  depth = min(rowSums(otu.tab))
-		  otu.tab <- as.matrix(otu.tab)
-		  ind <- (rowSums(otu.tab) < depth)
-		  sam.discard <- rownames(otu.tab)[ind]
-		  otu.tab <- otu.tab[!ind, ]
-		  rarefy <- function(x, depth) {
-		    y <- sample(rep(1:length(x), x), depth)
-		    y.tab <- table(y)
-		    z <- numeric(length(x))
-		    z[as.numeric(names(y.tab))] <- y.tab
-		    z
-		  }
-		  otu.tab.rff <- t(apply(otu.tab, 1, rarefy, depth))
-		  rownames(otu.tab.rff) <- rownames(otu.tab)
-		  colnames(otu.tab.rff) <- colnames(otu.tab)
-		  return(otu.tab.rff)
-		}
-		
-
-		library(caret)
-		library(miLineage)
+    get_otu = function(phyobj){
+      otu = otu_table(phyobj)@.Data
+      tax = tax_table(phyobj)@.Data     
+      # if(dim(tax)[1] == dim(otu)[1]){
+      if(all(rownames(tax) == rownames(otu))){
+        return(otu)
+      } else {
+        return(t(otu))
+      }     
+    }
 
 
-		# Get sample, otu, tax from physeq obj
-		otu = otu_table(phyobj)
-		tax = tax_table(phyobj)
-		sample = sample_data(phyobj)
+    get_tax = function(phyobj){
+      tax = tax_table(phyobj)@.Data
+      return(tax)
+    }
 
-		otu = adjust_otu_dimmension(otu, tax, sample) # transpose otu if wrong dimmension
+    get_sample = function(phyobj){
+      sample = as.data.frame(sample_data(phyobj)@.Data, stringsAsFactors = FALSE,  # sample_data gives list of data lists with no list names
+        col.names = sample_data(phyobj)@names, row.names = sample_data(phyobj)@row.names) # manually reassign column and row names    
+      return(sample)
+    }
 
-		set.seed(11) #for exampledata producibility
+    find_na_index = function(selected= NULL, sample = NULL){
 
-		otu.QCAT_GEE = .Rarefy(otu)
-		tax.QCAT_GEE = tax@.Data
-		colnames(tax.QCAT_GEE) = paste0("Rank", 1:ncol(tax.QCAT_GEE))
-		result_get_sample.QCAT_GEE_index = get_sample.QCAT_GEE_index(sample, cov_n, cov_c, con_n, con_c)
-		sample.QCAT_GEE = result_get_sample.QCAT_GEE_index$mat
-		indices.cova.QCAT_GEE = result_get_sample.QCAT_GEE_index$index
-		browser()
+      selected_split = strsplit(x = selected, split = "%mistudio_seperator%",  fixed = TRUE)[[1]]
+      stopifnot(length(selected_split) == 2)
+      value = selected_split[1] # the value users chooses, as displayed on UI
+      column = selected_split[2] # the column in which the value resides
+      if(value == column){ # only runs when user chooses the whole column
+        index = is.na(sample[, column, drop = TRUE])
+        return(index)
+      } else{
+        return(NULL)
+      }   
+    }
+    if(milineage_function == "QCAT"){
+      milineage_cova_extra = NULL
+      milineage_conf_extra = NULL
+    }
+    otu = get_otu(phyobj)
+    tax = get_tax(phyobj)
+    sample = get_sample(phyobj)
 
-		QCAT_GEE(otu.QCAT_GEE, sample.QCAT_GEE, indices.cova.QCAT_GEE,
-		         sample.QCAT_GEE, indices.cova.QCAT_GEE, tax.QCAT_GEE,
-		         n.perm = n.resample, fdr.alpha=fdr.alpha, min.depth = min.depth)
-	}
+    index_logical_list = lapply(c(milineage_cova,milineage_conf,milineage_cova_extra,milineage_conf_extra),   FUN = find_na_index, sample)
+    index_logical_list = index_logical_list[!sapply(index_logical_list, is.null)] # remove NULL lists
+    index_logical = Reduce("|", index_logical_list) # find all rows that have NA
 
-	graphlan = function(phyobj, result){
+    sample = sample[!index_logical, ,drop = FALSE]
+    otu = otu[, !index_logical, drop = FALSE]
+    return(phyloseq(tax_table(tax), otu_table(otu, taxa_are_rows = TRUE), sample_data(sample)))
+  }
 
-		if(is.null(result$sig.lineage)){
-			warning("No significant lineage found in miLineage")
-			return()
-		}
+  get_OTU = function(phyobj, milineage_function){    
+  		# unlike other get_otu function, this one is to generate OTU input for milineage so we must transpose it in the end to make row as sample and column as otu
+  	  otu = otu_table(phyobj)@.Data
+  	  tax = tax_table(phyobj)@.Data     
+  	  # .Rarefy = function (otu.tab) 
+  	  # {
+  	  #   depth = min(rowSums(otu.tab))
+  	  #   otu.tab <- as.matrix(otu.tab)
+  	  #   ind <- (rowSums(otu.tab) < depth)
+  	  #   sam.discard <- rownames(otu.tab)[ind]
+  	  #   otu.tab <- otu.tab[!ind, ]
+  	  #   rarefy <- function(x, depth) {
+  	  #     y <- sample(rep(1:length(x), x), depth)
+  	  #     y.tab <- table(y)
+  	  #     z <- numeric(length(x))
+  	  #     z[as.numeric(names(y.tab))] <- y.tab
+  	  #     z
+  	  #   }
+  	  #   otu.tab.rff <- t(apply(otu.tab, 1, rarefy, depth))
+  	  #   rownames(otu.tab.rff) <- rownames(otu.tab)
+  	  #   colnames(otu.tab.rff) <- colnames(otu.tab)
+  	  #   return(otu.tab.rff)
+  	  # } 
+      if(all(rownames(tax) == rownames(otu))){
+  	    otu = otu
+  	  } else {
+  	    otu = t(otu)
+  	  }     
+  	  otu = t(otu) # the extra line for milineage and milineagec only 
+  	  if(milineage_function == "QCAT_GEE"){
+        set.seed(11)
+  	    # otu = .Rarefy(otu)  
+        otu = miProfile:::.Rarefy(otu)
+        
+  	  }
+  	  return(otu) 
+  	}
+  
+  	get_X = function(phyobj, cova, conf){
 
-		
-		## function for write tax
-		writetax = function(phyobj){
-		  tax = tax_table(phyobj)
-		  ## unique tax
-		  tax = unique(tax)
-		  fileinfo = file('guide.txt')
+  		convert_all = function(phyobj = NULL, multiple_selected = NULL){
+  			
+  			stopifnot(!is.null(phyobj))
+  			stopifnot(!is.null(multiple_selected))
 
-		  i = 1
-		  while(i <= nrow(tax)){
-		    # parse NA
-		    names = as.character(tax[i,])
-		    index = as.logical(is.na(names))
-		    names = names[!index]
-		    ## set string
-		    writestr = paste0(names, collapse = ".")
-		    
-		    write(writestr, 'guide.txt', append = TRUE)
-		    i = i + 1
-		  }
-		  close(fileinfo)
-		  
-		}
+  			convert_one = function(phyobj = NULL, selected= NULL){
 
-		writeannot = function(results){
-		  
-		  # ************************test************************ #
-		  # results = c("Erysipelotrichaceae","Erysipelotrichaceae",
-		  #             "Neisseriaceae", "Pseudomonadaceae" )
-		  # ************************test************************ #
-		  
-		  results = unique(results)
-		  if(length(results) == 0){
-		    return()
-		  }
-		  ########### Start Ugly Work Around Method For Just exampledata########### 
-		  # results = substr(results, 4, nchar(results))
-		  ########### End Ugly Work Around Method For Just exampledata########### 
-		  fileinfo = file('annot.txt')
-		  cat(file = fileinfo)  
-		  
-		  write("branch_bracket_depth\t0.8", 'annot.txt', append = TRUE)
-		  write("branch_bracket_width\t0.25", 'annot.txt', append = TRUE)
-		  write("branch_thickness\t0.5", 'annot.txt', append = TRUE)
-		  write("clade_marker_size\t1", 'annot.txt', append = TRUE)
-		  write("clade_marker_edge_color\t#555555", 'annot.txt', append = TRUE)
-		  write("clade_marker_edge_width\t0.1", 'annot.txt', append = TRUE)
-		  write("", 'annot.txt', append = TRUE)
+  				stopifnot(!is.null(phyobj))
+  				stopifnot(!is.null(selected))
+  				stopifnot(length(selected) == 1)
 
-		  # Get rainbow colors 
-		  colors.original = rainbow(length(results))
-		  colors.graphlan = substr(colors.original, start = 1, stop = 7)
-		  
-		  for (result in results){
-		    writestr = paste(result, "annotation",result,sep="\t")
-		    write(writestr, 'annot.txt', append = TRUE)
-		    milineage <- function(result, colors.graphlan) {
-			    writestr = paste(result, "annotation_background_color", colors.graphlan[1],
-			        sep = "\t")
-		    }
+  				# split the user selected value by sperator, assign splitted strings accordingly
+  				selected_split = strsplit(x = selected, split = "%mistudio_seperator%",  fixed = TRUE)[[1]]
+  				stopifnot(length(selected_split) == 2)
 
-		    write(writestr, 'annot.txt', append = TRUE)
-		    writestr = paste(result, "clade_marker_shape\t*" ,sep="\t")
-		    write(writestr, 'annot.txt', append = TRUE)
-		    writestr = paste(result, "clade_marker_size\t20" ,sep="\t")
-		    write(writestr, 'annot.txt', append = TRUE)
-		    writestr = paste(result, "clade_marker_edge_color", colors.graphlan[1], sep="\t")
-		    write(writestr, 'annot.txt', append = TRUE)
-		    writestr = paste(result, "clade_marker_edge_width\t1" ,sep="\t")
-		    write(writestr, 'annot.txt', append = TRUE)
-		    write("", 'annot.txt', append = TRUE)
+  				value = selected_split[1] # the value users chooses, as displayed on UI
+  				column = selected_split[2] # the column in which the value resides
 
-		    colors.graphlan = colors.graphlan[-1]
-		  }
-		  close(fileinfo)
-		}
-		## function for running graphlan
+  				sample = as.data.frame(sample_data(phyobj)@.Data, stringsAsFactors = FALSE,  # sample_data gives list of data lists with no list names
+  					col.names = sample_data(phyobj)@names, row.names = sample_data(phyobj)@row.names) # manually reassign column and row names
 
-		run_graphlan = function(){
-		  s1 = "export PATH=`pwd`/graphlan/:$PATH"
-		  s2 = "export LC_ALL=en_US.UTF-8"
-		  s3 = "export LANG=en_US.UTF-8"
-		  s4 = "graphlan_annotate.py --annot annot.txt guide.txt guide.xml"
-		  s5 = "graphlan.py guide.xml migraph.png --dpi 300 --size 3.5"
-		  
-		  call = paste(s1,s2,s3,s4,s5, sep = " && ")
-		  system(call)
-		}
-		writetax(phyobj)
-		writeannot(as.character(result$sig.lineage))
-		run_graphlan()
-	}
+  				sample = as.data.frame(lapply(sample, as.character), stringsAsFactors = FALSE) # get sample data as a list of vectors of characters
 
-	# run
-	result = milineage(phyobj, cov_n, cov_c, con_n, con_c, 
-		n.resample = n.resample, fdr.alpha = fdr.alpha, min.depth = min.depth)
-	# result$stacked_plot = get_stacked_plot(phyobj, result$sig.lineage)
-	return(result)
-	graphlan(phyobj, result)
-	return(result)
+  				whole_column = !(value %in% sample[, column, drop = TRUE]) # if the whole column is selected
+
+  				if(whole_column){
+  					# if whole column selected 
+  					non_numeric = suppressWarnings(all(is.na(as.numeric(sample[, column, drop = TRUE])))) # check if selected column is actually numeric
+  					if(non_numeric){
+  						# the column is not numeric, convert to dummy var
+  						result = model.matrix(~., data = sample[, column, drop = FALSE])[, -1] # use [, -1] to remove intercept
+  					} else{
+  						# a numeric column
+  						result = suppressWarnings(as.matrix(as.numeric(sample[, column, drop = TRUE])))
+  					}
+  				} else{
+  					# only one option selected
+  					result = as.matrix(ifelse(sample[column] == value, 1, 0)) # convert that value as 1, else 0
+  				}
+
+  				return(result)
+
+  			}
+
+  			result_list = lapply(X = multiple_selected, FUN = convert_one, phyobj = phyobj) # lapply returns a list of matrixes
+  			result = do.call(what = cbind, args = result_list) # cbind all the matrixes in the list
+  			return(result)
+  		}
+      get_mat_keep = function(mat){
+        mat_append_one = cbind(1, mat) # append one to the end of the matrix
+        index_keep = qr(mat_append_one)$pivot[seq_len(qr(mat_append_one)$rank)] # get the index of columns to remove in mat_append_one
+        # if all index are kept, then it means no linear dependency, thus we return the original matrix
+        if(length(index_keep) == 1){ # mat is one column and all 1's
+          stop("milineag/milineagc: calculating linear dependence of the cova+conf selected; all variables are linear dependent with a column of 1; please select new variables")
+        }
+        stopifnot(all(mat_append_one[, index_keep, drop = FALSE][, 1, drop = FALSE] == 1))
+        return(mat[, (index_keep-1), drop = FALSE]) 
+      }
+
+  		mat_cova = convert_all(phyobj, cova) # converts categorical to dummies, continuous to numeric columns
+  		if(is.null(conf)){
+  		  mat = mat_cova
+  		} else {
+  		  mat_conf = convert_all(phyobj, conf)
+  		  mat = cbind(mat_cova, mat_conf)
+  		}
+      return(get_mat_keep(mat))
+  	
+  	}  
+ 	get_X.index = function(phyobj, cova, conf){
+ 		# for each categorical column, do model.matrix(~., data)[-1] # remove intersect
+ 		# for each subcategorical, do one column of 1,0 value
+ 		# that means selecting a column at once, and selecting a all subcategories of the column would give different result
+ 		# selecting a column at once would give one less column in X than selecting all subcategories (because model.matrix would select a baseline while selecting each subcategory would not ) 
+ 		convert_all = function(phyobj = NULL, multiple_selected = NULL){
+ 			
+ 			stopifnot(!is.null(phyobj))
+ 			stopifnot(!is.null(multiple_selected))
+
+ 			convert_one = function(phyobj = NULL, selected= NULL){
+
+ 				stopifnot(!is.null(phyobj))
+ 				stopifnot(!is.null(selected))
+ 				stopifnot(length(selected) == 1)
+
+ 				# split the user selected value by sperator, assign splitted strings accordingly
+ 				selected_split = strsplit(x = selected, split = "%mistudio_seperator%",  fixed = TRUE)[[1]]
+ 				stopifnot(length(selected_split) == 2)
+
+ 				value = selected_split[1] # the value users chooses, as displayed on UI
+ 				column = selected_split[2] # the column in which the value resides
+
+ 				sample = as.data.frame(lapply(sample_data(phyobj), as.character), stringsAsFactors = FALSE) # get sample data as a list of vectors of characters
+
+ 				whole_column = !(value %in% sample[, column, drop = TRUE]) # if the whole column is selected
+
+ 				if(whole_column){
+ 					# if whole column selected 
+ 					non_numeric = suppressWarnings(all(is.na(as.numeric(sample[, column, drop = TRUE])))) # check if selected column is actually numeric
+ 					if(non_numeric){
+ 						# the column is not numeric, convert to dummy var
+ 						result = model.matrix(~., data = sample[, column, drop = FALSE])[, -1] # use [, -1] to remove intercept
+
+ 					} else{
+ 						# a numeric column
+ 						result = suppressWarnings(as.matrix(as.numeric(sample[, column, drop = TRUE])))
+ 					}
+ 				} else{
+ 					# only one option selected
+ 					result = as.matrix(ifelse(sample[column] == value, 1, 0)) # convert that value as 1, else 0
+ 				}
+
+ 				return(result)
+
+ 			}
+
+ 			result_list = lapply(X = multiple_selected, FUN = convert_one, phyobj = phyobj) # lapply returns a list of matrixes
+ 			result = do.call(what = cbind, args = result_list) # cbind all the matrixes in the list
+      return(result)
+ 		}
+    get_index_keep = function(mat){
+      mat_append_one = cbind(1, mat) # append one to the end of the matrix
+      index_keep = qr(mat_append_one)$pivot[seq_len(qr(mat_append_one)$rank)] # get the index of columns to remove in mat_append_one
+      # if all index are kept, then it means no linear dependency, thus we return the original matrix
+      if(length(index_keep) == 1){ # mat is one column and all 1's
+        stop("milineag/milineagc: calculating linear dependence of the cova+conf selected; all variables are linear dependent with a column of 1; please select new variables")
+      }
+      stopifnot(all(mat_append_one[, index_keep, drop = FALSE][, 1, drop = FALSE] == 1))
+      return(index_keep-1) # would give index like c(0,1,3,6,8). The 0 would not be picked when doing indexing
+    }
+
+
+ 		mat_cova = convert_all(phyobj, cova) # converts categorical to dummies, continuous to numeric columns
+ 		if(is.null(conf)){
+ 		  mat = mat_cova
+ 		} else {
+ 		  mat_conf = convert_all(phyobj, conf)
+ 		  mat = cbind(mat_cova, mat_conf)
+ 		}
+    index_original = 1:ncol(mat_cova) # the index of cova when linear dependency is not removed
+    index_final = 1:length(intersect(index_original, get_index_keep(mat)))
+    return(index_final)
+
+ 	}
+  
+    get_Tax = function(phyobj){
+      tax = tax_table(phyobj)@.Data
+      colnames(tax) = paste0("Rank", 1:ncol(tax))
+      return(tax)
+    }
+  
+  ########################################main########################################
+  phyobj = remove_sample_na(phyobj, milineage_cova, milineage_conf, milineage_cova_extra,
+    milineage_conf_extra, milineage_function)
+  OTU = get_OTU(phyobj,milineage_function) # only .Rarefy for non QCAT functions(i.e. QCAT_GEE, ZIGDM)
+  X = get_X(phyobj, milineage_cova, milineage_conf)
+  X.index = get_X.index(phyobj, milineage_cova, milineage_conf)
+  Tax = get_Tax(phyobj)
+  min.depth = milineage_mindepth
+  n.perm = milineage_nresample
+  fdr.alpha = milineage_fdralpha  
+  set.seed(11)
+  if(milineage_function == "QCAT"){
+    return(QCAT(OTU = OTU, X = X, X.index = X.index, Tax = Tax, min.depth = min.depth, n.perm = n.perm, fdr.alpha = fdr.alpha))
+    
+  } else if(milineage_function == "QCAT_GEE"){
+    if(is.null(milineage_cova_extra)){ # if no zero-part covaritae given, do not provide Z or Z.index
+    	if(!is.null(milineage_conf_extra)){
+    		warnings("milineag QCAT_GEE: ignoring zero-part confouding since zero-part covariate is not given")
+    	}
+    	return(QCAT_GEE(OTU = OTU, X = X, X.index = X.index, Tax = Tax, min.depth = min.depth, n.perm = n.perm, fdr.alpha = fdr.alpha))
+    } else {
+      if(milineage_cova_extra == milineage_cova && milineage_conf_extra == milineage_conf){ # the user does not select extras
+        return(QCAT_GEE(OTU = OTU, X = X, X.index = X.index, Tax = Tax, min.depth = min.depth, n.perm = n.perm, fdr.alpha = fdr.alpha))
+      } else{
+        Z = get_X(phyobj, milineage_cova_extra, milineage_conf_extra)
+        Z.index = get_X.index(phyobj, milineage_cova_extra, milineage_conf_extra)  
+        return(QCAT_GEE(OTU = OTU, X = X, X.index = X.index, Z = Z, Z.index = Z.index, Tax = Tax, min.depth = min.depth, n.perm = n.perm, fdr.alpha = fdr.alpha))
+      }        
+    }    
+  } else if(milineage_function == "ZIGDM"){
+    
+    ZI.LB = milineage_ZI.LB
+    
+    if(milineage_testtype == "mean abundance"){
+      
+      X4mean = get_X(phyobj, milineage_cova, milineage_conf)
+      X.index = get_X.index(phyobj, milineage_cova, milineage_conf)
+      return(ZIGDM(OTU = OTU, X4mean = X4mean, X4disp = NULL, X4zero = NULL, test.type = "Mean", X.index = X.index, ZI.LB = ZI.LB, Tax = Tax, min.depth = min.depth, n.perm = n.perm, fdr.alpha = fdr.alpha, details = FALSE))
+      
+    } else if(milineage_testtype == "dispersion level"){
+      
+      X4disp = get_X(phyobj, milineage_cova, milineage_conf)
+      X.index = get_X.index(phyobj, milineage_cova, milineage_conf)
+      return(ZIGDM(OTU = OTU, X4mean = NULL, X4disp = X4disp, X4zero = NULL, test.type = "Disp", X.index = X.index, ZI.LB = ZI.LB, Tax = Tax, min.depth = min.depth, n.perm = n.perm, fdr.alpha = fdr.alpha, details = FALSE))
+      
+      
+    } else if (milineage_testtype == "presence-absence frequency"){
+      
+      X4zero = get_X(phyobj, milineage_cova, milineage_conf)
+      X.index = get_X.index(phyobj, milineage_cova, milineage_conf)
+      return(ZIGDM(OTU = OTU, X4mean = NULL, X4disp = NULL, X4zero = X4zero, test.type = "Zero", X.index = X.index, ZI.LB = ZI.LB, Tax = Tax, min.depth = min.depth, n.perm = n.perm, fdr.alpha = fdr.alpha, details = FALSE))
+      
+    } else {
+      return(NULL)
+    }
+  } else {
+    return(NULL)
+  }
+  
 }
+
+########################################test########################################
+# library(phyloseq)
+# library(miLineage)
+# load("filterbarb.RData")
+# barb = filterbarb
+# # select cova numeric column: BMI, Age_FecSamp, MIND_Score
+# # select cova categorical column: Simple_Diagnosis, APOE4
+# # select cova subcategorical： White, Female
+# 
+# # select conf numeric column: BMI_Age %mistudio_seperator%
+# milineage_cova = c("BMI%mistudio_seperator%BMI", "Age_FecSamp%mistudio_seperator%Age_FecSamp", "MIND_Score%mistudio_seperator%MIND_Score", "Simple_Diagnosis%mistudio_seperator%Simple_Diagnosis", "APOE4%mistudio_seperator%APOE4", "White%mistudio_seperator%Ethnicity", "Female%mistudio_seperator%Sex")
+# milineage_conf = "BMI_Age%mistudio_seperator%BMI_Age"
+# 
+# set.seed(1)
+# r = mistudio_milineage(
+# 	phyobj = barb,
+# 	milineage_function = "ZIGDM",
+# 	milineage_cova = milineage_cova,
+# 	milineage_conf = milineage_conf,
+# 	milineage_cova_extra = NULL,
+# 	milineage_conf_extra = NULL,
+# 	milineage_mindepth = 0,
+# 	milineage_nresample = 1000,
+# 	milineage_fdralpha = 0.05,
+# 	milineage_ZI.LB = 10,
+# 	milineage_testtype  = "mean abundance"
+# 	)
+
